@@ -1,94 +1,61 @@
-# QuadWild with Bi-MDF solver
+# rqmesh-backend-quadwild
 
-This repo is a fork of [nicopietroni/quadwild](https://github.com/nicopietroni/quadwild). The original readme is preserved as [README_orig.md](README_orig.md)
+The optional **QuadWild-BiMDF** remeshing back-end for the [rqmesh](https://github.com/sandner-art/rqmesh) Blender
+extension ([rqmesh-blender](https://github.com/sandner-art/rqmesh-blender)), built as checksummed packages for all four
+Blender platforms.
 
-Its main purpose is to demonstrate the use of Bi-MDF quantization, see our [Project page](https://www.algohex.eu/publications/bimdf-quantization).
+This repository is a fork of [cgg-bern/quadwild-bimdf](https://github.com/cgg-bern/quadwild-bimdf), the authors'
+QuadWild with Bi-MDF quantization, itself a fork of [nicopietroni/quadwild](https://github.com/nicopietroni/quadwild).
+The shared-library build (`lib_quadwild`, `lib_quadpatches`) comes from
+[ksami/quadwild-bimdf](https://github.com/ksami/quadwild-bimdf), branch `feature/lib`; its commits are replayed here
+with their original authorship. The upstream README is kept as [README.upstream.md](README.upstream.md).
 
-The main code for Bi-MDF modeling can be found in [libs/quadretopology/quadretopology/qr_flow.cpp](libs/quadretopology/quadretopology/qr_flow.cpp)
+Base used at setup: **cgg**.
 
-## Changes from original QuadWild
+- `cgg`: cgg-bern `main` at `e722c7e` (2026-08-03) plus ksami's commits.
+- `ksami`: ksami's `feature/lib` at `b2f985b` (2024-10-08), unchanged.
 
-- Add Bi-MDF solver for quantization that can be used instead of Gurobi IQPs
-- Changed to CMake build system
-- Fixed alignment bug
-- Changed commandline arguments
-- Extended config file format
-- Build without Gurobi -- controlled by CMake variable `QUADRETOPOLOGY_WITH_GUROBI`
+**Licence:** GPL-3.0, like everything upstream. See [LICENSE](LICENSE) and [rqmesh/NOTICE.md](rqmesh/NOTICE.md).
 
-## Pre-built binaries
+## Branches
 
-We provide pre-built binaries in the [Releases section](https://github.com/cgg-bern/quadwild-bimdf/releases) for Linux, Windows and MacOS (arm64+x86_64).
+| Branch | Contents |
+|---|---|
+| `rqmesh` (default) | The base above, ksami's shared-library commits, our `qr_flow` change, packaging and CI, and the QRemeshify ctypes wrapper as a submodule pinned at `e5e5679` |
+| `main`, … | Upstream as forked, untouched |
 
-## Building (classic)
+## Releases
 
-You will need a relatively recent C++ compiler and CMake.
-On MacOS, you can get them from [Homebrew](https://brew.sh/) using `brew install git cmake`.
-This will also automatically install the required *XCode Command Line Tools*.
+Pushing a tag `rqmesh-vX.Y.Z` builds and publishes:
 
-```
-git clone --recursive https://github.com/cgg-bern/quadwild-bimdf/
-cd quadwild-bimdf
-cmake . -B build -DSATSUMA_ENABLE_BLOSSOM5=0
-cmake --build build
-```
+- `rqmesh_backend_quadwild_bimdf-{linux-x64,windows-x64,macos-arm64,macos-x64}.zip`: the libraries, the wrapper, `LICENSE`, a `SOURCE` note, and a manifest with SHA-256 checksums;
+- `index.json`: the package list for the extension's back-end manager;
+- `rqmesh-backend-quadwild-X.Y.Z-src.tar.gz`: the complete corresponding source, with every submodule and our changes. Blossom-V is excluded: it's not built and not free.
 
+The tags are prefixed so they never collide with upstream tags.
 
-## Usage
+**Using a release with the extension**
 
-```
-./build/Build/bin/quadwild path/to/input/mesh.obj  2 config/prep_config/basic_setup.txt
-./build/Build/bin/quad_from_patches path/to/input/mesh_rem_p0.obj 123 config/main_config/flow_noalign_lemon.txt
-```
+- **Self-hosted flavour:** set *Back-end index URL* to `https://github.com/sandner-art/rqmesh-backend-quadwild/releases/latest/download/index.json`. Downloads happen only with Blender's Online Access on, and after a confirmation.
+- **Blender Extensions flavour:** the platform does not allow downloading functional code. Download the package for your platform and use *Install Back-end from File*.
 
-Note that you need to add `_rem_p0.obj` to the filename of the input mesh; this is
-the output from the main quadwild binary.
-
-We included sample config files in `config/`. To improve output quality, adjust them to your needs :)
-
-
-## Container-based building and usage with podman
-
-The Dockerfile will most likely also work using Docker, but we didn't test this.
-
-### MacOS specific note
-You can install podman using [Homebrew](https://brew.sh/) with `brew install podman`.
-
-On MacOS, all podman containers live in a Linux VM. If you don't have one yet, create one using
-```
-podman machine init
-```
-
-For a successful build, more memory than the default is requried, and more CPU cores speed it up:
+## Updating upstream
 
 ```
-podman machine stop # only required if running
-podman machine set --memory 8192 podman-machine-default
-podman machine set --cpus 4 podman-machine-default
-podman machine start
+git fetch upstream
+git switch rqmesh
+git rebase --onto <new upstream commit> <old base commit> rqmesh   # replay ksami's and our commits
+rqmesh/tools/init_submodules.sh                                    # then run the workflow by hand
 ```
 
-### Building
+Then tag a new release.
 
-Create the container:
-```
-podman build . --build-arg WITH_GUROBI=0 -t quadwild-bimdf
-```
+**Upstream's `Build` workflow** (`.github/workflows/build.yaml`, manual trigger only) is left as forked. Don't use it for releases: it checks out every submodule, including Blossom-V.
 
-### Running
-Run the binaries; you need to mount some volume into the container to access your data, for example mapping `/Users`:
-```
-podman run --rm  --volume /Users:/Users quadwild-bimdf quadwild arguments-as-described-above
-podman run --rm  --volume /Users:/Users quadwild-bimdf quad_from_patches arguments-as-described-above
-```
+**Excluded:** Blossom-V (non-free) and Gurobi (commercial). The build passes `-DSATSUMA_ENABLE_BLOSSOM5=0 -DQUADRETOPOLOGY_WITH_GUROBI=OFF`.
 
+## Credits
 
-
-## License
-
-QuadWild as well as our additions and changes are licensed under the [GPL3](LICENSE).
-
-
-## Acknowledgements
-
-This project has been developed as part of the [AlgoHex](https://www.algohex.eu/) project, which has received funding from the European Research Council (ERC) under the European Union’s Horizon 2020 research and innovation programme ([Grant agreement No. 853343](https://cordis.europa.eu/project/id/853343)).
-
+- **QuadWild:** N. Pietroni, S. Nuvoli, T. Alderighi, P. Cignoni, M. Tarini. *Reliable Feature-Line Driven Quad-Remeshing*. ACM TOG 40(4), SIGGRAPH 2021.
+- **Bi-MDF quantization:** M. Heistermann, J. Warnett, D. Bommes. *Min-Deviation-Flow in Bi-directed Graphs for T-Mesh Quantization*. ACM TOG 42(4), SIGGRAPH 2023.
+- **Shared-library build and ctypes wrapper:** ksami (QRemeshify).

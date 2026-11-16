@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Builds the QuadWild-BiMDF back-end for the rqmesh Blender extension on all four Blender platforms and publishes the
+# packages, a checksummed index.json and the complete corresponding source as release assets.
+# Runs on the `rqmesh` branch of this fork.  Tags are prefixed (rqmesh-v0.1.0) so they never collide with upstream tags.
+name: rqmesh back-end
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['rqmesh-v*']
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, platform: linux-x64 }
+          - { os: windows-2022, platform: windows-x64 }
+          - { os: macos-14,     platform: macos-universal }   # one universal build, packaged as macos-arm64 + macos-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false }
+      - name: submodules (all except the non-free Blossom-V)
+        shell: bash
+        run: bash rqmesh/tools/init_submodules.sh
+      - name: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#rqmesh-v}" >> $GITHUB_ENV
+        if: github.ref_type == 'tag'
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - name: prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: prerequisites (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: build (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: |
+          EXTRA=""; [ "$RUNNER_OS" = "macOS" ] && EXTRA='-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64'
+          cmake . -GNinja -B build -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DSATSUMA_ENABLE_BLOSSOM5=0 \
+                -DQUADRETOPOLOGY_WITH_GUROBI=OFF -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON "$EXTRA"
+          cmake --build build --target lib_quadwild lib_quadpatches
+          mkdir -p libs_out && cp build/Build/lib/liblib_quadwild.* build/Build/lib/liblib_quadpatches.* libs_out/
+      - name: build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake . -B build -T ClangCl -DSATSUMA_ENABLE_BLOSSOM5=0 -DQUADRETOPOLOGY_WITH_GUROBI=OFF -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
+          cmake --build build --config $env:BUILD_TYPE --target lib_quadwild lib_quadpatches
+          New-Item -ItemType Directory -Force libs_out | Out-Null
+          Copy-Item build\Build\bin\$env:BUILD_TYPE\lib_quadwild.dll, build\Build\bin\$env:BUILD_TYPE\lib_quadpatches.dll libs_out\
+      - name: package
+        shell: bash
+        run: |
+          V="${VERSION:-0.0.0-dev}"
+          SRC="https://github.com/${GITHUB_REPOSITORY} @ ${GITHUB_SHA} (branch rqmesh: QuadWild-BiMDF from cgg-bern/quadwild-bimdf + ksami's shared-library commits + rqmesh changes, built without Blossom-V and Gurobi); complete source: rqmesh-backend-quadwild-$V-src.tar.gz in the same release"
+          if [ "${{ matrix.platform }}" = "macos-universal" ]; then PLATS="macos-arm64 macos-x64"; else PLATS="${{ matrix.platform }}"; fi
+          for P in $PLATS; do
+            python rqmesh/tools/make_backend_package.py --wrapper rqmesh/wrapper/QRemeshify/lib --libs libs_out --platform $P \
+              --version "$V" --license LICENSE --out rqmesh_backend_quadwild_bimdf-$P.zip --source "$SRC"
+          done
+      - uses: actions/upload-artifact@v4
+        with: { name: 'pkg-${{ matrix.platform }}', path: 'rqmesh_backend_quadwild_bimdf-*.zip' }
+
+  source:
+    # GPL-3 section 6: the complete corresponding source next to the binaries.  GitHub's automatic "Source code"
+    # archives omit submodules, so this archive is built explicitly (Blossom-V excluded: not built, not free).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false }
+      - run: bash rqmesh/tools/init_submodules.sh
+      - name: archive
+        run: |
+          V="${GITHUB_REF_NAME#rqmesh-v}"; [ "${{ github.ref_type }}" = "tag" ] || V=0.0.0-dev
+          N=rqmesh-backend-quadwild-$V
+          git rev-parse HEAD > SOURCE_COMMIT
+          git submodule status --recursive >> SOURCE_COMMIT
+          tar --exclude-vcs --exclude=./build --exclude=./libs/blossom5-cmake \
+              --transform "s,^\.,$N," -czf ../$N-src.tar.gz . && mv ../$N-src.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with: { name: src, path: 'rqmesh-backend-quadwild-*-src.tar.gz' }
+
+  release:
+    needs: [build, source]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-22.04
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - name: index
+        run: |
+          python3 rqmesh/tools/make_backend_index.py --out dist/index.json \
+            --base-url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/" \
+            dist/rqmesh_backend_quadwild_bimdf-*.zip
+      - uses: softprops/action-gh-release@v2
+        with: { files: 'dist/*' }

@@ -36,3 +36,6 @@
 [submodule "libs/blossom5-cmake"]
 	path = libs/blossom5-cmake
 	url = https://github.com/cgg-bern/blossom5-cmake
+[submodule "rqmesh/wrapper"]
+	path = rqmesh/wrapper
+	url = https://github.com/ksami/QRemeshify.git
