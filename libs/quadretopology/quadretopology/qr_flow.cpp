@@ -22,6 +22,9 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ****************************************************************************/
 
+#include <fstream>
+#include <cstdlib>
+#include <algorithm>
 #include "qr_flow.h"
 #include "qr_flow_config.h"
 #include "qr_singularity_pairs.h"
@@ -176,7 +179,8 @@ static FlowProblem make_bimdf(
             Node v, bool v_head,
             double target, double weight,
             ObjectiveKind obj = ObjectiveKind::QuadraticDeviation,
-            int lower=1
+            int lower=1,
+            int upper=-1
             ) -> Edge
     {
         assert (u != lemon::INVALID);
@@ -194,7 +198,7 @@ static FlowProblem make_bimdf(
                            .u_head = u_head, .v_head = v_head,
                            .cost_function = cf,
                            .lower = lower, // subsides must be quantized to >= 1
-                           .upper = BiMDF::inf()});
+                           .upper = (upper < 0 ? BiMDF::inf() : upper)});
     };
     // TODO PERF:  g.reserveNode(..); g.reserveEdge(..);
 
@@ -430,6 +434,24 @@ static FlowProblem make_bimdf(
 
     Node boundary = bimdf.add_node();
     double bnd_target = 0;
+    // --- RQM research hook (GPL-3, part of this modified file): dump subsides, read per-subside bounds ---
+    std::vector<int> rqm_lower(chart_data.subsides.size(), 1), rqm_upper(chart_data.subsides.size(), -1);
+    if (const char* dp = std::getenv("RQM_DUMP_SUBSIDES")) {
+        std::ofstream df(dp);
+        for (size_t i = 0; i < chart_data.subsides.size(); ++i) {
+            const auto& sd = chart_data.subsides[i];
+            df << i << " " << sd.incidentCharts[0] << " " << sd.incidentCharts[1] << " " << sd.length << " " << sd.vertices.size();
+            for (auto v : sd.vertices) df << " " << v;
+            df << "\n";
+        }
+    }
+    if (const char* bp = std::getenv("RQM_SUBSIDE_BOUNDS")) {
+        std::ifstream bf(bp); size_t id; int lo, up; int n_read = 0;
+        while (bf >> id >> lo >> up) {
+            if (id < rqm_lower.size()) { rqm_lower[id] = std::max(1, lo); rqm_upper[id] = up; ++n_read; }
+        }
+        std::cout << "RQM: read " << n_read << " subside bounds" << std::endl;
+    }
 
     for (size_t subside_id = 0; subside_id < chart_data.subsides.size(); subside_id++)
     {
@@ -488,7 +510,8 @@ static FlowProblem make_bimdf(
                 edges[1] = add_subside_edge(left_pair[1], true, boundary, true, .5 * target, paired_subside_weight);
 #endif
             } else {
-                edges[0] = add_subside_edge(left_single, true, boundary, true, left_target, left_iso_weight);
+                edges[0] = add_subside_edge(left_single, true, boundary, true, left_target, left_iso_weight,
+                                            ObjectiveKind::QuadraticDeviation, rqm_lower[subside_id], rqm_upper[subside_id]);
                 bnd_target += left_target;
                 problem.unpaired_edges.push_back(edges[0]);
             }
@@ -563,8 +586,8 @@ static FlowProblem make_bimdf(
 
                 // lower bounds for virtual subside connected via inter[i]:
                 // TODO: choose which one may be zero based on target lengths and weights
-                int lower0 = 1;
-                int lower1 = 1;
+                int lower0 = std::max(1, (rqm_lower[subside_id] + 1) / 2);
+                int lower1 = std::max(1, rqm_lower[subside_id] / 2);
                 edges[0] = add_subside_edge(inter[0], true,   left_pair[0], true,
                         left_taw.targets[0], aligned_iso_scale * left_taw.weight * left_iso_weight, iso_obj, lower0);
                 edges[1] = add_subside_edge(inter[1], true,   left_pair[1], true,
@@ -596,8 +619,10 @@ static FlowProblem make_bimdf(
 
             } else if (!left_paired && !right_paired) {
                 Node inter = bimdf.add_node(); // only used to model sum of quadratic functions
-                edges[0] = add_subside_edge(left_single, true, inter, true, left_target, left_iso_weight);
-                auto other_edge = add_subside_edge(inter, false, right_single, true, right_target, right_iso_weight);
+                edges[0] = add_subside_edge(left_single, true, inter, true, left_target, left_iso_weight,
+                                            ObjectiveKind::QuadraticDeviation, rqm_lower[subside_id], rqm_upper[subside_id]);
+                auto other_edge = add_subside_edge(inter, false, right_single, true, right_target, right_iso_weight,
+                                            ObjectiveKind::QuadraticDeviation, rqm_lower[subside_id], rqm_upper[subside_id]);
                 problem.unpaired_edges.push_back(edges[0]);
                 problem.unpaired_edges.push_back(other_edge);
             } else if (!left_paired && right_paired) {
