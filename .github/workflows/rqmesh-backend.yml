@@ -23,7 +23,7 @@ jobs:
           - { os: macos-15,     platform: macos-universal }   # one universal build, packaged as macos-arm64 + macos-x64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: { submodules: false }
       - name: submodules (all except the non-free Blossom-V)
         shell: bash
@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: echo "VERSION=${GITHUB_REF_NAME#rqmesh-v}" >> $GITHUB_ENV
         if: github.ref_type == 'tag'
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with: { python-version: '3.11' }
       - name: prerequisites (Linux)
         if: runner.os == 'Linux'
@@ -65,7 +65,7 @@ jobs:
             python rqmesh/tools/make_backend_package.py --wrapper rqmesh/wrapper/QRemeshify/lib --libs libs_out --platform $P \
               --version "$V" --license LICENSE --out rqmesh_backend_quadwild_bimdf-$P.zip --source "$SRC"
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with: { name: 'pkg-${{ matrix.platform }}', path: 'rqmesh_backend_quadwild_bimdf-*.zip' }
 
   source:
@@ -73,7 +73,7 @@ jobs:
     # archives omit submodules, so this archive is built explicitly (Blossom-V excluded: not built, not free).
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: { submodules: false }
       - run: bash rqmesh/tools/init_submodules.sh
       - name: archive
@@ -84,7 +84,7 @@ jobs:
           git submodule status --recursive >> SOURCE_COMMIT
           tar --exclude-vcs --exclude=./build --exclude=./libs/blossom5-cmake \
               --transform "s,^\.,$N," -czf ../$N-src.tar.gz . && mv ../$N-src.tar.gz .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with: { name: src, path: 'rqmesh-backend-quadwild-*-src.tar.gz' }
 
   release:
@@ -93,8 +93,8 @@ jobs:
     runs-on: ubuntu-22.04
     permissions: { contents: write }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
         with: { path: dist, merge-multiple: true }
       - name: index
         run: |
